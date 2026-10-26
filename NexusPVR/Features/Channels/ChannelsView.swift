@@ -1062,9 +1062,12 @@ struct ChannelsView: View {
     #endif
 
     #if !os(tvOS)
-    /// Catch-up can restart the airing program on Dispatcharr; otherwise an
-    /// in-progress recording of it can be played from its start.
+    /// An in-progress recording can be played from its start; otherwise catch-up
+    /// can restart the airing program on Dispatcharr.
     private func canWatchFromStart(channel: Channel, program: Program, recording: Recording?) -> Bool {
+        if recording?.recordingStatus == .recording {
+            return true
+        }
         #if DISPATCHERPVR
         if CatchupAvailability.isAvailableFromStart(
             program: program,
@@ -1074,12 +1077,20 @@ struct ChannelsView: View {
             return true
         }
         #endif
-        return recording?.recordingStatus == .recording
+        return false
     }
 
     private func watchFromStart(channel: Channel, program: Program, recording: Recording?) {
         Task {
             do {
+                if let recording, recording.recordingStatus == .recording {
+                    try await RecordingPlaybackHelper.playFromBeginning(
+                        recording: recording,
+                        using: client,
+                        appState: appState
+                    )
+                    return
+                }
                 #if DISPATCHERPVR
                 if CatchupAvailability.isAvailableFromStart(
                     program: program,
@@ -1096,11 +1107,6 @@ struct ChannelsView: View {
                     return
                 }
                 #endif
-                guard let recording, recording.recordingStatus == .recording else { return }
-                let url = try await appState.preparingStream {
-                    try await client.recordingStreamURL(recordingId: recording.id)
-                }
-                appState.playStream(url: url, title: program.name, recordingId: recording.id)
             } catch {
                 streamError = error.localizedDescription
             }
